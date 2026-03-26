@@ -1,66 +1,93 @@
-/*
-   Conexiones para el módulo MFRC522 con ESP32:
+#include <WiFi.h>
+#include <PubSubClient.h>
 
-   Módulo MFRC522  -   ESP32
-   3.3V             -   3.3V
-   RST              -   27
-   GND              -   GND
-   IRQ              -   No utilizado
-   MISO             -   19
-   MOSI             -   23
-   SCK              -   18
-   SDA (SS)         -   15
-*/
+// 1. Credenciales de Wi-Fi
+const char* ssid = "UA-Alumnos";
+const char* password = "41umn05WLC";
 
-#include "SPI.h"          // Incluimos la librería SPI para la comunicación serial periférica
-#include "MFRC522.h"      // Incluimos la librería MFRC522 para interactuar con el lector RFID
+// 2. Datos del servidor MQTT (Tu instancia EC2)
+const char* mqtt_server = "98.80.100.211"; // Ej: "18.222.111.99"
+const int mqtt_port = 1883;
 
-#define RST_PIN  27       // Definimos el pin de reinicio del lector RFID
-#define SS_PIN   15       // Definimos el pin de selección (SS) del lector RFID
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-MFRC522 mfrc522(SS_PIN, RST_PIN); // Creamos una instancia del lector RFID
+long lastMsg = 0;
+int contadorMensajes = 0;
+
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Conectando a ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi conectado");
+  Serial.print("Dirección IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  // Bucle hasta que estemos conectados
+  while (!client.connected()) {
+    Serial.print("Intentando conexión MQTT...");
+    
+    // Creamos un ID de cliente aleatorio
+    String clientId = "ESP32Client-";
+    clientId += String(random(0xffff), HEX);
+    
+    // Intentamos conectar
+    if (client.connect(clientId.c_str())) {
+      Serial.println("¡Conectado al broker MQTT en EC2!");
+      // Aquí podríamos suscribirnos a un topic si quisiéramos recibir comandos
+      // client.subscribe("cinta/comandos"); 
+    } else {
+      Serial.print("Fallo, rc=");
+      Serial.print(client.state());
+      Serial.println(" intentando de nuevo en 5 segundos");
+      delay(5000);
+    }
+  }
+}
 
 void setup() {
-    Serial.begin(115200);           
-    while (!Serial);                
-    
-    // Agregamos un mensaje inicial para saber que arrancó bien y no ver la pantalla en blanco
-    Serial.println("\nIniciando sistema...");
-    
-    SPI.begin();                    
-    mfrc522.PCD_Init();             
-    mfrc522.PCD_SetAntennaGain(110);  
-    
-    Serial.println("Lector listo. Esperando tarjeta...");
+  Serial.begin(115200);
+  
+  setup_wifi();
+  
+  // Configuramos la dirección del servidor MQTT y el puerto
+  client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop() {
-    // 1. Preguntamos si hay una tarjeta. Si no la hay, el return hace que el loop vuelva a empezar al instante.
-    // Esto se ejecuta miles de veces por segundo, logrando la detección inmediata.
-    if (!mfrc522.PICC_IsNewCardPresent()) {
-        return; 
-    }
+  // Si se desconecta el Wi-Fi o el broker, intentamos reconectar
+  if (!client.connected()) {
+    reconnect();
+  }
+  
+  // Mantiene viva la conexión MQTT y procesa mensajes entrantes
+  client.loop();
 
-    // 2. Si detectó una tarjeta, intentamos leer su código.
-    if (!mfrc522.PICC_ReadCardSerial()) {
-        return; 
-    }
-
-    // 3. Si llegamos a esta línea, la lectura fue exitosa e instantánea
-    Serial.println("Contenido de la tarjeta:"); 
+  // Enviar un mensaje cada 5 segundos de forma no bloqueante
+  long now = millis();
+  if (now - lastMsg > 5000) {
+    lastMsg = now;
+    contadorMensajes++;
     
-    for (byte i = 0; i < mfrc522.uid.size; i++) {
-        Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "); 
-        Serial.print(mfrc522.uid.uidByte[i], HEX);
-    }
-    Serial.println(); 
+    // Preparamos el mensaje a enviar (simulando un dato de control)
+    String mensaje = "Lectura de sistema #" + String(contadorMensajes) + " - OK";
     
-    // 4. Detenemos la comunicación actual de la tarjeta
-    mfrc522.PICC_HaltA();    
-    mfrc522.PCD_StopCrypto1();
+    // Publicamos en el topic "cinta/control/estado"
+    Serial.print("Publicando mensaje: ");
+    Serial.println(mensaje);
     
-    // 5. EL CAMBIO CLAVE: El delay va aquí adentro.
-    // Así, el sistema solo se pausa por 1 segundo LUEGO de leer exitosamente, 
-    // dándote tiempo de retirar la mano antes de volver a leer la misma tarjeta.
-    delay(1000); 
+    client.publish("cinta/control/estado", mensaje.c_str());
+  }
 }
