@@ -29,7 +29,7 @@ void setup() {
     
     SPI.begin();                    
     mfrc522.PCD_Init();             
-    mfrc522.PCD_SetAntennaGain(110);  
+    mfrc522.PCD_SetAntennaGain(120);  
     
     Serial.println("Lector listo. Esperando tarjeta...");
 }
