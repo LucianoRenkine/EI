@@ -6,7 +6,7 @@ const char* ssid = "UA-Alumnos";
 const char* password = "41umn05WLC";
 
 // 2. Datos del servidor MQTT (Tu instancia EC2)
-const char* mqtt_server = "98.80.100.211"; // Ej: "18.222.111.99"
+const char* mqtt_server = "3.231.217.99"; // Ej: "18.222.111.99"
 const int mqtt_port = 1883;
 
 WiFiClient espClient;
@@ -88,6 +88,6 @@ void loop() {
     Serial.print("Publicando mensaje: ");
     Serial.println(mensaje);
     
-    client.publish("cinta/control/estado", mensaje.c_str());
+    client.publish("factory/height", mensaje.c_str());
   }
 }
