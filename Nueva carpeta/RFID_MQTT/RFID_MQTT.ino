@@ -3,135 +3,160 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
-// --- 1. Credenciales de Wi-Fi y MQTT ---
-const char* ssid = "UA-Alumnos";
-const char* password = "41umn05WLC";
-const char* mqtt_server = "44.192.23.249"; // Tu instancia EC2
-const int mqtt_port = 1883;
+// ─── CREDENCIALES ────────────────────────────────────────────────
+const char* ssid        = "UA-Alumnos";
+const char* password    = "41umn05WLC";
+const char* mqtt_server = "98.81.32.212";
+const int   mqtt_port   = 1883;
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+// ─── PINES RFID (igual al código funcional) ──────────────────────
+#define RST_PIN 27
+#define SS_PIN  15
+// ► NO definir SCK/MISO/MOSI — SPI.begin() sin args usa los defaults
+//   correctos del ESP32: SCK=18, MISO=19, MOSI=23
 
-// --- 2. Configuración de Pines RFID ---
-#define RST_PIN  27
-#define SS_PIN   15
-#define SCK_PIN  19
-#define MISO_PIN 18
-#define MOSI_PIN 23
-
-MFRC522 mfrc522(SS_PIN, RST_PIN);
-
-// --- 3. Configuración de Pines Ultrasónico ---
+// ─── PINES ULTRASÓNICO ───────────────────────────────────────────
 #define TRIG_PIN 5
-#define ECHO_PIN 14 // ¡IMPORTANTE! Asegurate de que el cable físico esté en el 14, no en el 18
-float distanciaVacia = 28.0; 
+#define ECHO_PIN 14
 
+const float DISTANCIA_VACIA = 28.0;
+
+// ─── OBJETOS ─────────────────────────────────────────────────────
+WiFiClient   espClient;
+PubSubClient client(espClient);
+MFRC522      mfrc522(SS_PIN, RST_PIN);
+
+// ─── ESTADO MQTT no bloqueante ───────────────────────────────────
+unsigned long lastMqttAttempt = 0;
+const unsigned long MQTT_RETRY_MS = 5000;
+
+// ═════════════════════════════════════════════════════════════════
 void setup_wifi() {
-  delay(10);
-  Serial.println();
   Serial.print("Conectando a ");
   Serial.println(ssid);
-
   WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED) {
+  int intentos = 0;
+  while (WiFi.status() != WL_CONNECTED && intentos < 20) {
     delay(500);
     Serial.print(".");
+    intentos++;
   }
 
-  Serial.println("");
-  Serial.println("WiFi conectado");
-  Serial.print("Dirección IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-void reconnect() {
-  while (!client.connected()) {
-    Serial.print("Intentando conexión MQTT...");
-    
-    String clientId = "ESP32Client-";
-    clientId += String(random(0xffff), HEX);
-    
-    if (client.connect(clientId.c_str())) {
-      Serial.println("¡Conectado al broker MQTT en EC2!");
-    } else {
-      Serial.print("Fallo, rc=");
-      Serial.print(client.state());
-      Serial.println(" intentando de nuevo en 5 segundos");
-      delay(5000);
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi conectado — IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\nSin WiFi. Continuando igual...");
   }
 }
 
+// ─── Reconexión MQTT sin bloquear el loop ────────────────────────
+void mqttReconnectIfNeeded() {
+  if (client.connected()) return;
+
+  unsigned long ahora = millis();
+  if (ahora - lastMqttAttempt < MQTT_RETRY_MS) return;
+  lastMqttAttempt = ahora;
+
+  String clientId = "ESP32-" + String(random(0xffff), HEX);
+  Serial.print("Intentando MQTT... ");
+
+  if (client.connect(clientId.c_str())) {
+    Serial.println("¡Conectado!");
+  } else {
+    Serial.print("Fallo rc=");
+    Serial.println(client.state());
+  }
+}
+
+// ─── Ultrasónico con timeout (no bloquea) ────────────────────────
 float medirAltura() {
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  long duracion = pulseIn(ECHO_PIN, HIGH);
-  
-  float lecturaSensor = duracion * 0.034 / 2;
-  float alturaCaja = distanciaVacia - lecturaSensor; 
-  if (alturaCaja < 0) alturaCaja = 0; 
-  
-  return alturaCaja;
+
+  // Timeout 30ms — si no hay eco no congela el loop
+  long duracion = pulseIn(ECHO_PIN, HIGH, 30000UL);
+
+  if (duracion == 0) {
+    Serial.println("[ULTRASÓNICO] Sin eco — retorna 0");
+    return 0.0;
+  }
+
+  float lectura = duracion * 0.034f / 2.0f;
+  float altura  = DISTANCIA_VACIA - lectura;
+  if (altura < 0) altura = 0;
+  return altura;
 }
 
+// ═════════════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
-  
-  Serial.println("\nIniciando sistema IoT...");
+  // ► Sin while(!Serial) — el ESP32 no necesita esperar la UART
+  delay(200);
+
+  Serial.println("\n=== Iniciando sistema IoT ===");
 
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
-  // Iniciar Wi-Fi y MQTT ANTES que el RFID para estabilizar voltajes
   setup_wifi();
   client.setServer(mqtt_server, mqtt_port);
 
-  // Iniciar SPI con los pines personalizados
-  SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, SS_PIN);
+  // ► SPI.begin() SIN argumentos — igual al código que funciona
+  SPI.begin();
   mfrc522.PCD_Init();
   mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max);
-  
-  Serial.println("Sensores listos. Esperando caja (tarjeta RFID)...");
+
+  Serial.println("Lector listo. Esperando tarjeta RFID...\n");
 }
 
+// ═════════════════════════════════════════════════════════════════
 void loop() {
-  // 1. Mantener la conexión de red
-  if (!client.connected()) {
-    reconnect();
-  }
+  // 1. Red — no bloqueante
+  mqttReconnectIfNeeded();
   client.loop();
 
-  // 2. Nueva lógica de detección amable con el procesador
-  if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-    
-    String idTarjeta = ""; 
-    for (byte i = 0; i < mfrc522.uid.size; i++) {
-      idTarjeta += mfrc522.uid.uidByte[i] < 0x10 ? "0" : ""; 
-      idTarjeta += String(mfrc522.uid.uidByte[i], HEX);
-    }
-    idTarjeta.toUpperCase(); 
+  // 2. RFID — mismo patrón exacto que el código funcional
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+  if (!mfrc522.PICC_ReadCardSerial())   return;
 
-    float alturaCalculada = medirAltura();
+  // 3. Leer UID — igual al código funcional
+  String idTarjeta = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    idTarjeta += mfrc522.uid.uidByte[i] < 0x10 ? "0" : "";
+    idTarjeta += String(mfrc522.uid.uidByte[i], HEX);
+  }
+  idTarjeta.toUpperCase();
 
-    String payload = "{\"objectId\":\"" + idTarjeta + "\",\"measuredHeight\":" + String(alturaCalculada, 2) + "}";
+  // 4. Medir altura sólo cuando hay tarjeta
+  float altura = medirAltura();
 
-    Serial.println("\n--- NUEVA LECTURA ---");
-    Serial.print("Publicando en factory/height: ");
-    Serial.println(payload);
-    
-    client.publish("factory/height", payload.c_str());
+  // 5. Log serial
+  Serial.println("\n─── NUEVA LECTURA ───────────────");
+  Serial.println("ID     : " + idTarjeta);
+  Serial.print  ("Altura : ");
+  Serial.print  (altura, 2);
+  Serial.println(" cm");
 
-    mfrc522.PICC_HaltA();    
-    mfrc522.PCD_StopCrypto1();
-    
-    delay(1500); // Pausa para que avance la cinta
+  // 6. Publicar MQTT
+  String payload = "{\"objectId\":\"" + idTarjeta +
+                   "\",\"measuredHeight\":" +
+                   String(altura, 2) + "}";
+
+  if (client.connected()) {
+    bool ok = client.publish("factory/height", payload.c_str());
+    Serial.println(ok ? "✓ MQTT publicado" : "✗ Falló publicación");
+    Serial.println("Payload: " + payload);
+  } else {
+    Serial.println("⚠ Sin MQTT — lectura no enviada");
   }
 
-  // 3. Oxígeno para el ESP32 (Previene bloqueos de hardware)
-  delay(10); 
+  // 7. Finalizar tarjeta — igual al código funcional
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+
+  delay(1000); // igual al código funcional
 }
