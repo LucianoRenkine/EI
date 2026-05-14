@@ -7,37 +7,34 @@
 // ─── CREDENCIALES ────────────────────────────────────────────────
 const char* ssid        = "UA-Alumnos";
 const char* password    = "41umn05WLC";
-const char* mqtt_server = "98.81.32.212";
+const char* mqtt_server = "3.214.255.9";
 const int   mqtt_port   = 1883;
 
 // ─── PINES RFID ──────────────────────────────────────────────────
-#define RST_PIN      27
-#define SS_PIN       15
+#define RST_PIN  27
+#define SS_PIN   15
 
 // ─── PINES ULTRASÓNICO ───────────────────────────────────────────
-#define TRIG_PIN     5
-#define ECHO_PIN     14
+#define TRIG_PIN 5
+#define ECHO_PIN 14
 
 // ─── PINES MOTOR (L298N) ─────────────────────────────────────────
-#define MOTOR_IN1    26
-#define MOTOR_IN2    25
+#define MOTOR_IN1 26
+#define MOTOR_IN2 25
 
-// ─── PINES SERVO Y BOTONES ───────────────────────────────────────
-#define SERVO_PIN    4
-#define BTN_ACEPTAR  32
-#define BTN_RECHAZAR 33
+// ─── PINES SERVO ─────────────────────────────────────────────────
+#define SERVO_PIN 4
 
 // ─── ÁNGULOS DEL SERVO ───────────────────────────────────────────
 // Si el servo vibra en REPOSO, subí SERVO_REPOSO de a 5 grados
 // hasta que deje de vibrar (ej: 10, 15, 20...)
-#define SERVO_REPOSO   10   // Posición de paso libre (con margen del tope)
-#define SERVO_DESCARTE 90   // Posición de descarte
+#define SERVO_REPOSO   10
+#define SERVO_DESCARTE 90
 
 // ─── CONSTANTES ──────────────────────────────────────────────────
-const float          DISTANCIA_VACIA   = 28.0;
-const unsigned long  MQTT_RETRY_MS     = 5000;
-const unsigned long  TIMEOUT_DB_MS     = 4000;
-const unsigned long  TIMEOUT_HUMANO_MS = 10000;
+const float          DISTANCIA_VACIA  = 28.0;
+const unsigned long  MQTT_RETRY_MS    = 5000;
+const unsigned long  TIMEOUT_TOTAL_MS = 60000; // Seguridad si la web se cae
 
 // ─── OBJETOS ─────────────────────────────────────────────────────
 WiFiClient   espClient;
@@ -66,9 +63,9 @@ void motorOff() {
 void servoDescartar() {
   Serial.println("[SERVO] Descartando...");
   brazoServo.write(SERVO_DESCARTE);
-  delay(2000);                        // Tiempo en posición de descarte
+  delay(2000);
   brazoServo.write(SERVO_REPOSO);
-  delay(1500);                        // Tiempo para volver físicamente
+  delay(1500);
   Serial.println("[SERVO] En reposo.");
 }
 
@@ -93,6 +90,8 @@ void setup_wifi() {
 }
 
 // ─── CALLBACK MQTT ───────────────────────────────────────────────
+// Cualquier mensaje en factory/result con ACCEPT o REJECT es válido
+// sin importar si viene del backend o de la web
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
@@ -152,26 +151,22 @@ void setup() {
   delay(200);
   Serial.println("\n=== Iniciando sistema IoT Industrial ===");
 
-  // ─── Pines motor
+  // ─── Motor
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
 
-  // ─── Pines ultrasónico
+  // ─── Ultrasónico
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
-  // ─── Botones — conectados entre GPIO y GND (presionado = LOW)
-  pinMode(BTN_ACEPTAR,  INPUT_PULLUP);
-  pinMode(BTN_RECHAZAR, INPUT_PULLUP);
-
-  // ─── Servo — se mueve a posición inicial al arrancar
+  // ─── Servo — va a posición inicial al arrancar
   brazoServo.setPeriodHertz(50);
   brazoServo.attach(SERVO_PIN, 500, 2400);
   Serial.println("[SERVO] Centrando en posición inicial...");
   brazoServo.write(SERVO_REPOSO);
-  delay(1500); // Espera a que llegue físicamente antes de seguir
+  delay(1500);
   Serial.println("[SERVO] Listo.");
 
   // ─── Red
@@ -217,7 +212,7 @@ void loop() {
   Serial.println("ID     : " + idTarjeta);
   Serial.print  ("Altura : "); Serial.print(altura, 2); Serial.println(" cm");
 
-  // 6. Publicar por MQTT
+  // 6. Publicar y esperar decisión (la web maneja el timeout)
   String payload = "{\"objectId\":\"" + idTarjeta +
                    "\",\"measuredHeight\":" + String(altura, 2) + "}";
 
@@ -226,71 +221,40 @@ void loop() {
 
   if (client.connected()) {
     client.publish("factory/height", payload.c_str());
-    Serial.println("Enviado. Esperando respuesta DB (4s)...");
+    Serial.println("Enviado. Esperando decisión final...");
 
-    unsigned long esperaDB = millis();
-    while (!llegoRespuestaDB && millis() - esperaDB < TIMEOUT_DB_MS) {
+    unsigned long espera     = millis();
+    unsigned long ultimoPrint = millis();
+
+    while (!llegoRespuestaDB && millis() - espera < TIMEOUT_TOTAL_MS) {
       client.loop();
       delay(10);
+
+      // Log de espera cada 5 segundos para no saturar el monitor
+      if (millis() - ultimoPrint > 5000) {
+        unsigned long restante = TIMEOUT_TOTAL_MS - (millis() - espera);
+        Serial.println("    Esperando... " + String(restante / 1000) + "s restantes");
+        ultimoPrint = millis();
+      }
     }
   } else {
-    Serial.println("⚠ Sin MQTT — procesando sin DB");
+    Serial.println("⚠ Sin MQTT — procesando sin conexión");
   }
 
-  // 7. Si no llegó respuesta → REJECT por seguridad
+  // 7. Ejecutar resultado
   if (!llegoRespuestaDB) {
-    Serial.println("⚠ Timeout DB → REJECT por defecto");
+    Serial.println("⚠ Sin respuesta tras 60s → REJECT por seguridad");
     respuestaDB = "REJECT";
   }
 
-  // 8. Ejecutar resultado
   if (respuestaDB == "ACCEPT") {
-
-    Serial.println(">>> DB: ACEPTADO ✓");
-
+    Serial.println(">>> ACEPTADO ✓");
   } else {
-
-    Serial.println(">>> DB: RECHAZADO");
-    Serial.println(">>> Validación humana — 10 segundos...");
-    Serial.println("    BTN ACEPTAR = forzar paso | BTN RECHAZAR = descartar");
-
-    unsigned long timerHumano = millis();
-    String decisionFinal = "REJECT";
-    static unsigned long ultimoPrint = 0;
-    ultimoPrint = 0;
-
-    while (millis() - timerHumano < TIMEOUT_HUMANO_MS) {
-
-      if (digitalRead(BTN_ACEPTAR) == LOW) {
-        decisionFinal = "ACCEPT";
-        Serial.println(">>> Operario: FORZÓ ACEPTAR");
-        break;
-      }
-      if (digitalRead(BTN_RECHAZAR) == LOW) {
-        decisionFinal = "REJECT";
-        Serial.println(">>> Operario: CONFIRMÓ RECHAZO");
-        break;
-      }
-
-      // Cuenta regresiva cada segundo
-      unsigned long restante = TIMEOUT_HUMANO_MS - (millis() - timerHumano);
-      if (millis() - ultimoPrint > 1000) {
-        Serial.println("    Tiempo: " + String(restante / 1000) + "s");
-        ultimoPrint = millis();
-      }
-
-      client.loop();
-      delay(50);
-    }
-
-    if (decisionFinal == "ACCEPT") {
-      Serial.println(">>> Pieza ACEPTADA por operario.");
-    } else {
-      servoDescartar(); // Función unificada con delays correctos
-    }
+    Serial.println(">>> RECHAZADO");
+    servoDescartar();
   }
 
-  // 9. Finalizar tarjeta y reanudar cinta
+  // 8. Finalizar tarjeta y reanudar cinta
   mfrc522.PICC_HaltA();
   mfrc522.PCD_StopCrypto1();
 
