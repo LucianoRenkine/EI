@@ -1,5 +1,5 @@
 const int Trigger = 5;   //Pin digital 2 para el Trigger del sensor
-const int Echo = 18;   //Pin digital 3 para el Echo del sensor
+const int Echo = 14;   //Pin digital 3 para el Echo del sensor
 
 void setup() {
   Serial.begin(9600);//iniciailzamos la comunicación

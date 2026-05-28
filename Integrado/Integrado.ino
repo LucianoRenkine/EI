@@ -32,7 +32,7 @@ const int   mqtt_port   = 1883;
 #define SERVO_DESCARTE 90
 
 // ─── CONSTANTES ──────────────────────────────────────────────────
-const float          DISTANCIA_VACIA  = 28.0;
+const float          DISTANCIA_VACIA  = 9.0;
 const unsigned long  MQTT_RETRY_MS    = 5000;
 const unsigned long  TIMEOUT_TOTAL_MS = 60000; // Seguridad si la web se cae
 
