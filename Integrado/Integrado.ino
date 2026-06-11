@@ -18,9 +18,11 @@ const int   mqtt_port   = 1883;
 #define TRIG_PIN 5
 #define ECHO_PIN 14
 
-// ─── PINES MOTOR (L298N) ─────────────────────────────────────────
+// ─── PINES MOTOR (L298N) ─────────────────────────────────────────++º
 #define MOTOR_IN1 26
 #define MOTOR_IN2 25
+#define MOTOR_IN3 13 
+#define MOTOR_IN4 33
 
 // ─── PINES SERVO ─────────────────────────────────────────────────
 #define SERVO_PIN 4
@@ -51,12 +53,16 @@ String        respuestaDB      = "";
 void motorOn() {
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
+  digitalWrite(MOTOR_IN3, HIGH);  // ← nuevo
+  digitalWrite(MOTOR_IN4, LOW);   // ← nuevo 
   Serial.println("[MOTOR] Encendido");
 }
 
 void motorOff() {
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
+  digitalWrite(MOTOR_IN3, LOW);   // ← nuevo
+  digitalWrite(MOTOR_IN4, LOW);   // ← nuevo
   Serial.println("[MOTOR] Detenido");
 }
 
@@ -149,13 +155,21 @@ float medirAltura() {
 void setup() {
   Serial.begin(115200);
   delay(200);
+  pinMode(MOTOR_IN3, OUTPUT);
+  digitalWrite(MOTOR_IN3, LOW);
+  pinMode(MOTOR_IN4, OUTPUT);
+  digitalWrite(MOTOR_IN4, LOW);
   Serial.println("\n=== Iniciando sistema IoT Industrial ===");
 
   // ─── Motor
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
+  pinMode(MOTOR_IN3, OUTPUT);  // ← nuevo
+  pinMode(MOTOR_IN4, OUTPUT);  // ← nuevo
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
+  digitalWrite(MOTOR_IN3, LOW);  // ← nuevo
+  digitalWrite(MOTOR_IN4, LOW);
 
   // ─── Ultrasónico
   pinMode(TRIG_PIN, OUTPUT);
