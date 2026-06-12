@@ -30,13 +30,13 @@ const int   mqtt_port   = 1883;
 // ─── ÁNGULOS DEL SERVO ───────────────────────────────────────────
 // Si el servo vibra en REPOSO, subí SERVO_REPOSO de a 5 grados
 // hasta que deje de vibrar (ej: 10, 15, 20...)
-#define SERVO_REPOSO   10
-#define SERVO_DESCARTE 90
+#define SERVO_CERRADO  0    
+#define SERVO_ABIERTO  90
 
 // ─── CONSTANTES ──────────────────────────────────────────────────
 const float          DISTANCIA_VACIA  = 9.0;
 const unsigned long  MQTT_RETRY_MS    = 5000;
-const unsigned long  TIMEOUT_TOTAL_MS = 60000; // Seguridad si la web se cae
+const unsigned long  TIMEOUT_TOTAL_MS = 15000; // Seguridad si la web se cae
 
 // ─── OBJETOS ─────────────────────────────────────────────────────
 WiFiClient   espClient;
@@ -66,13 +66,14 @@ void motorOff() {
   Serial.println("[MOTOR] Detenido");
 }
 
-void servoDescartar() {
-  Serial.println("[SERVO] Descartando...");
-  brazoServo.write(SERVO_DESCARTE);
-  delay(2000);
-  brazoServo.write(SERVO_REPOSO);
-  delay(1500);
-  Serial.println("[SERVO] En reposo.");
+void servoAbrir() {
+  Serial.println("[SERVO] Abriendo paso...");
+  brazoServo.write(SERVO_ABIERTO);
+  motorOn();        // ← arranca la cinta mientras el servo está abierto
+  delay(1000);      // ← servo abierto 3 segundos con la cinta andando
+  brazoServo.write(SERVO_CERRADO);
+  delay(1500);      // ← tiempo para que cierre físicamente
+  Serial.println("[SERVO] Cerrado.");
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -179,7 +180,7 @@ void setup() {
   brazoServo.setPeriodHertz(50);
   brazoServo.attach(SERVO_PIN, 500, 2400);
   Serial.println("[SERVO] Centrando en posición inicial...");
-  brazoServo.write(SERVO_REPOSO);
+  brazoServo.write(SERVO_CERRADO);
   delay(1500);
   Serial.println("[SERVO] Listo.");
 
@@ -263,16 +264,15 @@ void loop() {
 
   if (respuestaDB == "ACCEPT") {
     Serial.println(">>> ACEPTADO ✓");
+    servoAbrir();         // ya arranca el motor internamente
   } else {
-    Serial.println(">>> RECHAZADO");
-    servoDescartar();
+    Serial.println(">>> RECHAZADO — servo quieto.");
+    motorOn();            // solo en rechazo arranca la cinta acá
   }
 
-  // 8. Finalizar tarjeta y reanudar cinta
   mfrc522.PICC_HaltA();
   mfrc522.PCD_StopCrypto1();
 
-  motorOn();
   Serial.println("Línea reanudada.\n");
 
   delay(1000);
