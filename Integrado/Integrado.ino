@@ -135,23 +135,40 @@ void mqttReconnectIfNeeded() {
 
 // ─── ULTRASÓNICO ─────────────────────────────────────────────────
 float medirAltura() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  // Flush de red antes de medir para minimizar interrupciones WiFi
+  client.loop();
+  delay(5);
 
-  long duracion = pulseIn(ECHO_PIN, HIGH, 30000UL);
+  float alturaFinal = 0.0;
+  int intentos = 0;
 
-  if (duracion == 0) {
-    Serial.println("[ULTRASÓNICO] Sin eco");
-    return 0.0;
+  // Hasta 3 intentos para esquivar interrupciones WiFi
+  while (intentos < 3) {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+
+    long duracion = pulseIn(ECHO_PIN, HIGH, 30000UL);
+
+    if (duracion > 0) {
+      float altura = DISTANCIA_VACIA - (duracion * 0.034f / 2.0f);
+      alturaFinal = max(altura, 0.0f);
+      break; // Medición exitosa — salir
+    }
+
+    intentos++;
+    Serial.println("[ULTRASÓNICO] Sin eco — reintentando (" + String(intentos) + "/3)");
+    delay(20); // Pequeña pausa entre intentos
   }
 
-  float altura = DISTANCIA_VACIA - (duracion * 0.034f / 2.0f);
-  return max(altura, 0.0f);
-}
+  if (alturaFinal == 0.0 && intentos == 3) {
+    Serial.println("[ULTRASÓNICO] Falló tras 3 intentos");
+  }
 
+  return alturaFinal;
+}
 // ═════════════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
