@@ -30,13 +30,13 @@ const int   mqtt_port   = 1883;
 // ─── ÁNGULOS DEL SERVO ───────────────────────────────────────────
 // Si el servo vibra en REPOSO, subí SERVO_REPOSO de a 5 grados
 // hasta que deje de vibrar (ej: 10, 15, 20...)
-#define SERVO_CERRADO  0    
-#define SERVO_ABIERTO  90
+#define SERVO_CERRADO  110 
+#define SERVO_ABIERTO  0
 
 // ─── CONSTANTES ──────────────────────────────────────────────────
 const float          DISTANCIA_VACIA  = 9.0;
 const unsigned long  MQTT_RETRY_MS    = 5000;
-const unsigned long  TIMEOUT_TOTAL_MS = 15000; // Seguridad si la web se cae
+const unsigned long  TIMEOUT_TOTAL_MS = 45000; // Seguridad si la web se cae
 
 // ─── OBJETOS ─────────────────────────────────────────────────────
 WiFiClient   espClient;
@@ -69,10 +69,11 @@ void motorOff() {
 void servoAbrir() {
   Serial.println("[SERVO] Abriendo paso...");
   brazoServo.write(SERVO_ABIERTO);
-  motorOn();        // ← arranca la cinta mientras el servo está abierto
-  delay(1000);      // ← servo abierto 3 segundos con la cinta andando
+  delay(500);             // ← espera 0.5s antes de arrancar los motores
+  motorOn();
+  delay(1000);            // ← servo abierto con cinta andando
   brazoServo.write(SERVO_CERRADO);
-  delay(1500);      // ← tiempo para que cierre físicamente
+  delay(1500);            // ← tiempo para cerrar físicamente
   Serial.println("[SERVO] Cerrado.");
 }
 
@@ -209,7 +210,7 @@ void setup() {
   // ─── RFID
   SPI.begin();
   mfrc522.PCD_Init();
-  mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max);
+  mfrc522.PCD_SetAntennaGain(110);
 
   // ─── Arrancar cinta
   motorOn();
